@@ -1,0 +1,550 @@
+1.
+
+package learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+
+object FirstSparkApp {
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName("first spark app").setMaster(args(0))
+    val sc = new SparkContext(conf)
+    val fileRDD = sc.textFile("/home/cloudera/Desktop/sample.txt")
+    fileRDD.foreach(println)
+  }
+
+}
+
+2.
+package learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+
+object SparkWordCount {
+
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName("Spark Word Count").setMaster(args(0))
+    val sc = new SparkContext(conf)
+    val fileRDD = sc.textFile("/home/cloudera/Desktop/sample.txt")
+
+    val wordsRDD =fileRDD.flatMap(line => line.split(" "))
+
+    val wordsPairRDD = wordsRDD.map(word => (word,1))
+
+    val wordcountRDD1 = wordsPairRDD.reduceByKey(_+_)
+
+    wordcountRDD1.foreach(println)
+    println(wordcountRDD1.collect)
+
+  }
+}
+
+3.
+package learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+
+object SalesAmountWiseDiscount {
+
+  def main(args: Array[String]): Unit = {
+
+    val conf = new SparkConf().setAppName(getClass.getName)
+      //.setMaster("local") we will configure dynmacially in real time
+
+    val sc = new SparkContext(conf)
+    sc.setLogLevel("ERROR")
+
+    val salesRDD = sc.textFile(args(0),2)
+
+    val salesPairRDD = salesRDD.map(rec =>{
+      val fieldArr = rec.split(",")
+      (fieldArr(1),fieldArr(3).toDouble)
+    })
+
+    val totalAmountRDD = salesPairRDD.reduceByKey(_ + _)
+
+    val discountAmountRDD = totalAmountRDD.map(t=>{
+      if(t._2 >=1000) (t._1, t._2 *0.9)
+      else t
+
+    })
+    discountAmountRDD.foreach(println)
+  }
+
+}
+
+4. 
+package learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+
+object SalesAmountWiseDiscount {
+
+  def main(args: Array[String]): Unit = {
+
+    val conf = new SparkConf().setAppName(getClass.getName)
+      //.setMaster("local") we will configure dynmacially in real time
+
+    val sc = new SparkContext(conf)
+    sc.setLogLevel("ERROR")
+
+    val salesRDD = sc.textFile(args(0),2)  //here splitting into 2 partitions, args(0) means first argument.
+
+    val salesPairRDD = salesRDD.map(rec =>{
+      val fieldArr = rec.split(",")
+      (fieldArr(1),fieldArr(3).toDouble)
+    })
+
+    val totalAmountRDD = salesPairRDD.reduceByKey(_ + _)
+
+    val discountAmountRDD = totalAmountRDD.map(t=>{
+      if(t._2 >=1000) (t._1, t._2 *0.9)
+      else t
+
+    })
+    discountAmountRDD.foreach(println)
+	println(discountAmountRDD.collect.toList) -->
+	Thread.sleep(100000)
+  }
+
+}
+
+5.
+
+package org.training.spark.apiexamples.discount
+
+import org.training.spark.apiexamples.serialization.{SalesRecord, SalesRecordParser}
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.SparkContext._
+
+
+object AmountWiseDiscount {
+
+  def main(args: Array[String]) {
+    val conf = new SparkConf().setAppName("apiexamples").setMaster("local")
+    val sc = new SparkContext(conf)
+    val dataRDD = sc.textFile(args(0))
+    println("text") //this println will execute on driver
+
+    val salesRecordRDD = dataRDD.map(row => {
+      val parseResult = SalesRecordParser.parse(row)
+      println("text") // this println will exccute on executor side because all the transformation run on exccutor.
+      parseResult.right.get
+    })
+
+    val totalAmountByCustomer = salesRecordRDD.map(record => (record.customerId, record.itemValue))
+                                              .reduceByKey(_ + _)
+
+   // (custId, TotalAmount)
+    val discountAmountByCustomer = totalAmountByCustomer.map(record => {
+            val custId = record._1
+            val totalAmt = record._2
+          if(totalAmt > 1600) {
+            val afterDiscount = totalAmt - (totalAmt * 10) / 100.0
+            (custId, afterDiscount)
+          }
+          else
+            (custId, totalAmt)
+
+   })
+    /*val discountAmountByCustomer = totalAmountByCustomer.map {
+      case (customerId, totalAmount) => {
+        if (totalAmount > 1600) {
+          val afterDiscount = totalAmount - (totalAmount * 10) / 100.0
+          (customerId, afterDiscount)
+        }
+        else (customerId, totalAmount)
+      }
+    }*/
+
+    discountAmountByCustomer.collect().foreach(println)
+
+
+  }
+
+}
+
+
+6.accumulator
+
+package org.training.spark.apiexamples.errorhandling
+
+import org.training.spark.apiexamples.serialization.SalesRecordParser
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.SparkContext._
+
+
+object Counters {
+  def main(args: Array[String]) {
+
+    val conf = new SparkConf().setMaster(args(0)).setAppName("apiexamples")
+    val sc = new SparkContext(conf)
+    //sc.setLogLevel("ERROR")
+    val dataRDD = sc.textFile(args(1),2)
+    val malformedRecords = sc.accumulator(0)
+
+
+     //println("Partitions: "  + dataRDD.partitions.length)
+    // foreach is an action but runs at executor side
+
+    dataRDD.foreach(record => {
+      val parseResult = SalesRecordParser.parse(record)
+      if(parseResult.isLeft){
+        malformedRecords += 1
+      }
+    })
+
+    println("No of malformed records is =  " + malformedRecords.value)
+
+    /*val test = dataRDD.map(record => {
+      val parseResult = SalesRecordParser.parse(record)
+      if(parseResult.isLeft){
+        malformedRecords += 1
+      }
+    })
+    println(test.collect.toList)*/
+
+    //dataRDD.foreach(println(_))
+    //print the counter
+    //println("No of malformed records is =  " + malformedRecords.value)
+
+    //Thread.sleep(50000)
+
+  }
+
+}
+
+
+spark sql
+-----------------------------------
+-----------------------------------
+
+7.
+
+package org.training.spark.learning
+
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.{SparkConf, SparkContext}
+
+
+object SparkCSVLoader {
+
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName(getClass.getName)
+      .setMaster("local")
+
+    val sc = new SparkContext(conf)
+
+    val sqlContext = new SQLContext(sc)
+
+    val optionsMap = Map("header" -> "true", //to  idetify column names(Here Map is not higher order method , it is map collection, key value pair)
+      "inferSchema" -> "true", //to identify field type
+      "delimiter" -> ",") //default is comma
+
+    val csvDF = sqlContext.read.format("csv")
+      /*.option("header","true")
+      .option("inferSchema","true")*/
+      .options(optionsMap)    // see carefully here it is options() method.
+      .load("src/main/resources/sales.csv")
+    // val csvDF1 = spark.read.format("csv").load("/src/main/resources/sales.csv")
+    csvDF.show()
+    csvDF.printSchema()
+
+  }
+}
+
+8.
+
+package org.training.spark.learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.SQLContext
+
+object SparkXMLLoader {
+
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName(getClass.getName)
+      .setMaster("local")
+
+    val sc = new SparkContext(conf)
+
+    val sqlContext = new SQLContext(sc)
+
+    val xmlDF = sqlContext.read.format("xml")
+      .option("rowTag","person")// if we dont specify rowTag then it wont identify xml file and prints blank output
+      .load("src/main/resources/ages.xml")
+
+    xmlDF.show()
+    xmlDF.printSchema()
+
+    val flatDF = xmlDF.select("age._VALUE","age._birthplace","age._born","name")
+    flatDF.printSchema()
+    flatDF.show()
+
+    xmlDF.registerTempTable("v_xml")
+    sqlContext.sql("select age._VALUE,name from v_xml").show()
+
+
+  }
+
+}
+
+
+
+9.
+
+package org.training.spark.learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.functions._
+
+object SparkXMLLoader {
+
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName(getClass.getName)
+      .setMaster("local")
+
+    val sc = new SparkContext(conf)
+
+    val sqlContext = new SQLContext(sc)
+
+    val xmlDF = sqlContext.read.format("xml")
+      .option("rowTag","person")// if we dont specify rowTag then it wont identify xml file and prints blank output
+      .load("src/main/resources/ages.xml")
+
+    xmlDF.show()
+    xmlDF.printSchema()
+    import sqlContext.implicits._
+
+    //val flatDF = xmlDF.select("age._VALUE","age._birthplace","age._born","name")
+
+    val flatDf = xmlDF.select(xmlDF("age._VALUE").as ("age"),
+      col("age._birthplace").alias("birthplace"),
+      column("age._born").as ("borndate"),
+      $"name".alias("name1"))
+
+    flatDf.printSchema()
+    flatDf.show()
+
+    val flatDf1 = xmlDF.selectExpr("age._VALUE as age",
+    "upper(age._birthplace) as birthplace",
+    "trim(age._born) as borndate","name as name")
+
+
+    flatDf1.printSchema()
+    flatDf1.show()
+
+    xmlDF.registerTempTable("v_xml")
+    sqlContext.sql("select age._VALUE as age,name as name1 from v_xml").show()
+
+    //val newcolDF = flatDf1.withColumn("location_flag",lit("NA"))
+   // val newColDF = flatDf1.withColumn("location_flg",
+     // when (col("birthplace").isNotNull,"Y").otherwise("N") )
+
+    val newColdf = flatDf1.withColumn("age_catageory",
+      when(col("age") <=20,"teen")
+    .when(col("age")>=30 ,value ="Adult")
+          .otherwise("old"))
+
+    newColdf.show()
+    newColdf.printSchema()
+
+    val renamedDf= newColdf.withColumnRenamed("borndate","birthdate").drop("birthplace")
+    renamedDf.show()
+    renamedDf.printSchema()
+
+
+
+
+  }
+
+}
+
+
+10 .
+
+package org.training.spark.learning
+
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.functions._ // we want to use aggregation like min,max, avg, explode etc
+import org.apache.spark.sql.expressions.Window // we want to use window function
+import org.apache.spark.sql
+import org.apache.spark.sql.hive.HiveContext
+
+object SparkXMLLoader1 {
+
+  def main (args: Array[String] ): Unit = {
+  val conf = new SparkConf ().setAppName (getClass.getName)
+  .setMaster ("local")
+
+  val sc = new SparkContext (conf)
+
+  val sqlContext = new HiveContext(sc) // HERE sql context will be replaced with HiveContext
+
+
+    val xmlDF = sqlContext.read.format("xml")
+      .option("rowTag","book")// if we dont specify rowTag then it wont identify xml file and prints blank output
+      .load("src/main/resources/books-nested-array.xml")
+
+    xmlDF.printSchema()
+    xmlDF.show(5,true)
+
+    val disexp = xmlDF.select("_id","publish_date").show()
+// ****if already column is there withcolumn,will overwrite the same column. if column is not there it will add column at last.
+    val flatDF = xmlDF.withColumn("publish_date",
+      explode(col("publish_date")))
+
+    flatDF.printSchema()
+    flatDF.show(6,true)
+
+    val latestDF = flatDF.withColumn("rank",
+      rank().over(Window.partitionBy("_id").orderBy(col("publish_date").cast("date").desc)))
+
+    latestDF.printSchema()
+    latestDF.show()
+
+    val finalDF = latestDF.where("rank=1").drop("rank")
+    finalDF.show()
+
+
+}
+}
+
+10.json file format.
+
+
+package org.training.spark.learning
+
+import org.apache.spark.sql.hive.HiveContext
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.sql.functions._
+
+
+object sparkJsonloader {
+
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName(getClass.getName)
+      .setMaster("local")
+
+    val sc = new SparkContext (conf)
+
+    val sqlContext = new HiveContext(sc)
+
+    val jsondf = sqlContext.read.format("json")
+      .load("src/main/resources/sales.json")
+
+    jsondf.printSchema()
+
+    jsondf.show(5)
+
+    println("*************************1")
+
+    val aggDf = jsondf.groupBy("customerID").sum("amountPaid")
+    aggDf.show()
+
+    //here agg() method we can use aggregations like sum, count,min,max
+    val aggDf1 = jsondf.groupBy("customerID").agg(sum("amountPaid").as("totalAmount"),
+      count("itemID").as("totalItems"),
+      collect_list("itemId").as("itemsList")
+    )
+
+    aggDf1.show(truncate = false)
+
+    println("*************************2")
+
+    aggDf1.printSchema()
+
+
+    //compute totalamount after discount if the total amount is > 2000 add 10 percent
+println("*********************3")
+
+    aggDf1.select("customerID","totalAmount").show()
+    aggDf1.select(col("customerID"),col("totalAmount").as("sasi")).show()
+    //below when clause is used directly in select query.
+    aggDf1.select(col ("customerID"),col("totalAmount"), col("totalAmount") ,
+      when(col("totalAmount")>2000,1).otherwise(2).as("sairam")).show()
+
+    println("*********************4")
+	
+
+    val finalDF= aggDf1.withColumn("discountedTotalAmt",
+      when(col("totalAmount")>2000,
+        col("totalAmount")*0.9).otherwise(col("totalAmount")))
+
+    finalDF.show()
+
+  }
+}
+
+
+11)
+ Below program creating Dataframe from RDD
+ 
+package org.training.spark.learning
+
+import org.apache.spark.sql.{DataFrame, Row, SQLContext}
+import org.apache.spark.{SparkConf, SparkContext}
+
+case class SalesRecord(tid:Int,cid:Int,itemid:Int,price:Double) // creating case Class to store values.
+
+object RDDtoDataframe {
+
+  def main(args: Array[String]): Unit = {
+
+    val conf = new SparkConf().setAppName(getClass.getName)
+      .setMaster("local")
+
+    val  sc = new SparkContext(conf)
+
+    val sqlContext = new SQLContext(sc)
+
+    val salesRDD1 = sc.textFile("src/main/resources/sales.csv")
+
+    val salesRDD = salesRDD1.filter(rec => ! rec.startsWith("transactionId"))
+
+    //def getDFFfromRddcase():Unit = {
+    // creating the function and return type is dataframe
+    def getDFFfromRddcase():DataFrame= {
+      val schemaRDD = salesRDD.map(rec => {
+        val fieldArr = rec.split(",")
+        SalesRecord(fieldArr(0).toInt, fieldArr(1).toInt, // here we are writing or storing it into case class
+          fieldArr(2).toInt, fieldArr(3).toDouble)
+      })
+      import sqlContext.implicits._
+      // toDF method is available in implicts._
+      //below we are converting RDD into Dataframe by using toDF method.
+      val salesDF = schemaRDD.toDF
+      salesDF.printSchema()
+      salesDF.show()
+
+      println("************************************1")
+    // below we are creating Dataframe by using createDataFrame
+      val salesDf1 = sqlContext.createDataFrame(schemaRDD)
+      salesDf1.printSchema()
+      salesDf1.show()
+      salesDf1// here last line of this function should be Dataframe only because f
+              // or the function return type is dataframe only, if you write anything after this it will give error.
+
+    }
+    println("***********************************************2")
+    val outDF=getDFFfromRddcase()// calling function which is created above.
+    //below we are creating rowRDD by using Row method.
+    def getDFFromRDDRow():Unit ={
+      val rowRDD =salesRDD.map(rec => {
+        val fieldArr =rec.split(",")
+        Row(fieldArr(0).toInt,fieldArr(1).toInt,
+          fieldArr(2).toInt, fieldArr(3).toDouble)
+      })
+
+      //here below we are creating dataframe by using createDataFrame method and passing RowRDD along with struct type.
+      val df =sqlContext.createDataFrame(rowRDD,outDF.schema)
+      df.printSchema()
+      df.show()
+
+      println("***********************************************3")
+    }
+    getDFFromRDDRow()
+  }
+}
+
